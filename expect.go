@@ -1,8 +1,9 @@
+// Package cliexpect defines functions for matching text in a CLI environment. Specifically, each
+// match assumes an eventual prompt at the end of the data and handles this as a special case.
 package cliexpect
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -14,13 +15,13 @@ const (
 	defaultBuffSize = 16384
 	readBuffSize    = defaultBuffSize // Must always be lte size of defaultBuffSize
 
-	retrieveFmt = `(.*\n)(%s)\z`
+	matchFmt = `(?msU)(%s)(^%s)`
 )
 
 // Shell represents a structure used in expect-like interactions
 type Shell struct {
 	// Mandatory parameters
-	in     io.WriteCloser
+	in     io.Writer
 	out    io.Reader
 	prompt string
 
@@ -37,18 +38,18 @@ type Shell struct {
 }
 
 // New creates an expect struct using the specified Writer/Reader with default parameters
-func New(in io.WriteCloser, out io.Reader, prompt string) *Shell {
+func New(in io.Writer, out io.Reader, prompt string) *Shell {
 	return NewParam(in, out, prompt, defaultTimeout, defaultBuffSize)
 }
 
 // NewParam creates an expect struct using the specified Writer/Reader with the specified parameters
-func NewParam(in io.WriteCloser, out io.Reader, prompt string, timeout time.Duration, minBuffSize int) *Shell {
+func NewParam(in io.Writer, out io.Reader, prompt string, timeout time.Duration, minBuffSize int) *Shell {
 	// Can't set buffer size smaller than default
 	if minBuffSize < defaultBuffSize {
 		minBuffSize = defaultBuffSize
 	}
 	sh := &Shell{in: in, out: out, timeout: timeout, buffSize: minBuffSize}
-	sh.SetPromptRE(prompt)
+	sh.SetPrompt(prompt)
 	// We try an size the channel based on expected number of data chunks to fill a size target of minBuffSize
 	chanSize := minBuffSize / readBuffSize
 	sh.ch = make(chan error, chanSize)
@@ -57,10 +58,10 @@ func NewParam(in io.WriteCloser, out io.Reader, prompt string, timeout time.Dura
 	return sh
 }
 
-// SetPromptRE sets the underlying prompt regex used to match end out output in every expect operation
-func (s *Shell) SetPromptRE(prompt string) {
+// SetPrompt sets the underlying prompt regex used to match end out output in every expect operation
+func (s *Shell) SetPrompt(prompt string) {
 	s.prompt = prompt
-	s.retrieve = s.RegexMatcher(fmt.Sprintf(retrieveFmt, prompt))
+	s.retrieve = s.RegexMatcher(`.*`)
 }
 
 // resetBuff clears buffer and resizes to minBuffSize
@@ -77,7 +78,7 @@ func (s *Shell) reader() {
 		n, err := s.out.Read(buff)
 		if n > 0 {
 			s.lock.Lock()
-			s.buffer.Write(buff)
+			s.buffer.Write(buff[:n])
 			s.lock.Unlock()
 		}
 		// Notify that a read operation was completed and the resulting error, if any
@@ -100,7 +101,7 @@ func (s *Shell) Send(str string) error {
 }
 
 // SendLine sends a string followed by a newline to the shell
-func (s *Shell) SendLine(str string) error {
+func (s *Shell) SendLine(str string) error {u
 	return s.SendBytes([]byte(str + "\n"))
 }
 
@@ -112,24 +113,25 @@ func (s *Shell) Expect(m Matcher) (string, []string, error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	// Start by trying to match against existing data (will block if no data, however)
-	// TODO: Track how much time we spent wait to read - subtract from first wait, if needed
-	data, err := s.read()
-	if err != nil {
-		return "", nil, err
-	}
-	result := m(data)
-	// No matches? try waiting one timeout and trying again
-	if len(result) < 2 {
-		// TODO: Track how much time we actually waited and keep looping up until timeout has expired
-		if _, err := s.waitForData(s.timeout); err != nil {
+	var data string
+	var result []int
+	var timeSpent time.Duration
+
+	for {
+		d, dur, err := s.read(s.timeout - timeSpent)
+		if err != nil {
 			return "", nil, err
 		}
-		// NOTE: data is a cast to underlying []byte - no need to re-read
-		// Try the match again...
-		if result = m(data); len(result) < 2 {
-			return "", nil, errors.New("No matches")
+		timeSpent += dur
+		result = m(d)
+		// If we got matches then we are done...
+		if len(result) > 0 {
+			data = d
+			break
 		}
+	}
+	if len(result) < 2 {
+		return "", nil, errors.New("No matches")
 	}
 	// Prepare for the next operation
 	s.resetBuff()
@@ -140,44 +142,61 @@ func (s *Shell) Expect(m Matcher) (string, []string, error) {
 	}
 	// Take the index slice and convert it into all the matched strings
 	subMatchPairs := len(result) - 2
-	matches := make([]string, 0, subMatchPairs/2)
+	matches := make([]string, subMatchPairs/2)
 	for i, j := 0, 0; i < subMatchPairs; i, j = i+2, j+1 {
-		matches[j] = data[i : i+1]
+		matches[j] = data[result[2+i]:result[2+i+1]]
 	}
 	return data[result[0]:result[1]], matches, nil
 }
 
-// read data from the buffer and return it, waiting up to timeout if no data present
-func (s *Shell) read() (string, error) {
-	if err := ackReads(s.ch); err != nil {
-		return "", err
-	}
-	data := s.buffer.String()
-	if data == "" {
-		if _, err := s.waitForData(s.timeout); err != nil {
-			return "", err
-		}
-		// String() above is just a cast of underlying []byte - no need to update data
-	}
-	return data, nil
+// ExpectRegex takes a regex as a string, compiles it, and calls Expect looking for matches. The
+// return values are identical to Expect.
+func (s *Shell) ExpectRegex(re string) (string, []string, error) {
+	return s.Expect(s.RegexMatcher(re))
 }
 
-// ackReads acknowledges all outstanding read operations done by reader and return an error if there is one
-func ackReads(ch chan error) error {
+// Retrieve returns all the text before the next prompt. The results returned from this function
+// match those from the Expect function, but assume the text before the prompt is a single match
+// group (the first one)
+func (s *Shell) Retrieve() (string, []string, error) {
+	return s.Expect(s.retrieve)
+}
+
+// read data from the buffer and return it, waiting up to timeout if no data present. In addition
+// to a string of the actual data, the actual duration of time waited is returned
+func (s *Shell) read(timeout time.Duration) (string, time.Duration, error) {
+	var reads int
 	var err error
+	if reads, err = ackReads(s.ch); err != nil {
+		return "", 0, err
+	}
+	data := s.buffer.String()
+	if data == "" || reads == 0 {
+		d, err := s.waitForData(timeout)
+		return s.buffer.String(), d, err
+	}
+	return data, 0, nil
+}
+
+// ackReads acknowledges all outstanding read operations done by reader and returns number of
+// channel reads and an error if there is one
+func ackReads(ch chan error) (int, error) {
+	var err error
+	reads := 0
 	for {
 		select {
 		case err = <-ch:
+			reads++
 		default:
-			return err
+			return reads, err
 		}
 	}
 }
 
 // waitForData waits for the next read operation to complete by the reader waiting up to timeout
-// in duration. If it doesn't time out, it will return the duration that it waited
+// in duration. It returns the duration of time it actually waited in addition to a possible error
 func (s *Shell) waitForData(timeout time.Duration) (time.Duration, error) {
-	oldTime := time.Now()
+	t := time.Now()
 
 	// Note the inverted ordering - this is always called under lock, so undo lock so our reader
 	// goroutine can write new data to the builder
@@ -186,12 +205,8 @@ func (s *Shell) waitForData(timeout time.Duration) (time.Duration, error) {
 
 	select {
 	case err := <-s.ch:
-		if err != nil {
-			return time.Duration(0), err
-		}
-		// Return now long we waited
-		return oldTime.Sub(time.Now()), nil
+		return time.Since(t), err
 	case <-time.After(timeout):
-		return time.Duration(0), errors.New("Read timed out")
+		return timeout, errors.New("Read timed out")
 	}
 }
