@@ -101,7 +101,7 @@ func (s *Shell) Send(str string) error {
 }
 
 // SendLine sends a string followed by a newline to the shell
-func (s *Shell) SendLine(str string) error {u
+func (s *Shell) SendLine(str string) error {
 	return s.SendBytes([]byte(str + "\n"))
 }
 
