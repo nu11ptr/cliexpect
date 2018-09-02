@@ -1,2 +1,2 @@
-# cliexpect [![Build Status](https://travis-ci.org/nu11ptr/cliexpect.svg?branch=master)](https://travis-ci.org/nu11ptr/cliexpect) [![GoDoc](https://godoc.org/github.com/nu11ptr/cliexpect?status.svg)](https://godoc.org/github.com/nu11ptr/cliexpect)
+# cliexpect [![Build Status](https://travis-ci.org/nu11ptr/cliexpect.svg?branch=master)](https://travis-ci.org/nu11ptr/cliexpect) [![Build status](https://ci.appveyor.com/api/projects/status/hcn04efhv6be9qef/branch/master?svg=true)](https://ci.appveyor.com/project/nu11ptr/cliexpect/branch/master) [![GoDoc](https://godoc.org/github.com/nu11ptr/cliexpect?status.svg)](https://godoc.org/github.com/nu11ptr/cliexpect)
 An expect client designed to work specifically with CLI shell interfaces
