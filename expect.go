@@ -126,7 +126,7 @@ func (s *Shell) SendLine(str string) error {
 
 // Expect takes a matcher and tries to match it against the current data that was received. If it
 // cannot make a match, it will try again waiting up to timeout to make the match.  It returns the
-// entire match, all submatches, and an error, if any occured. If err is set then no matches will
+// entire match, all submatches, and an error, if any occurred. If err is set then no matches will
 // be returned
 func (s *Shell) Expect(m Matcher) (string, []string, error) {
 	s.lock.Lock()
