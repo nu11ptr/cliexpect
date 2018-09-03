@@ -15,20 +15,26 @@ const (
 	defaultBuffSize = 16384
 	readBuffSize    = defaultBuffSize // Must always be lte size of defaultBuffSize
 
-	matchFmt      = `(?msU)(%s)(^%s$)`
-	retrieveRegex = `.+`
+	matchFmt           = `(?msU)(%s)(^%s$)`
+	retrieveRegex      = `.+`     // Body can't actually be blank - at minimum it is a CR
+	defaultPromptRegex = "[^\n]+" // Prompt is one or more chars that are NOT a CR
 )
+
+// ShellParam defines optional parameters for the expect shell
+type ShellParam struct {
+	Timeout  time.Duration
+	BuffSize int
+	Prompt   string
+}
 
 // Shell represents a structure used in expect-like interactions
 type Shell struct {
 	// Mandatory parameters
-	in     io.Writer
-	out    io.Reader
-	prompt string
+	in  io.Writer
+	out io.Reader
 
 	// Options parameters
-	timeout  time.Duration
-	buffSize int
+	param ShellParam
 
 	// Reader loop vars
 	ch     chan error
@@ -39,36 +45,48 @@ type Shell struct {
 }
 
 // New creates an expect struct using the specified Writer/Reader with default parameters
-func New(in io.Writer, out io.Reader, prompt string) *Shell {
-	return NewParam(in, out, prompt, defaultTimeout, defaultBuffSize)
+func New(in io.Writer, out io.Reader) *Shell {
+	return NewWithParam(in, out, ShellParam{})
 }
 
-// NewParam creates an expect struct using the specified Writer/Reader with the specified parameters
-func NewParam(in io.Writer, out io.Reader, prompt string, timeout time.Duration, minBuffSize int) *Shell {
-	// Can't set buffer size smaller than default
-	if minBuffSize < defaultBuffSize {
-		minBuffSize = defaultBuffSize
+// validateParams validates parameters are in the appropriate range adjusting them if necessary
+func validateParams(param *ShellParam) {
+	if param.BuffSize < defaultBuffSize {
+		param.BuffSize = defaultBuffSize
 	}
-	sh := &Shell{in: in, out: out, timeout: timeout, buffSize: minBuffSize}
-	sh.SetPrompt(prompt)
+	if param.Timeout < 1 {
+		param.Timeout = defaultTimeout
+	}
+	if param.Prompt == "" {
+		param.Prompt = defaultPromptRegex
+	}
+}
+
+// NewWithParam creates an expect struct using the specified Writer/Reader with the specified parameters
+func NewWithParam(in io.Writer, out io.Reader, param ShellParam) *Shell {
+	validateParams(&param)
+
+	sh := &Shell{in: in, out: out, param: param}
+	sh.SetPrompt(param.Prompt)
 	// We try an size the channel based on expected number of data chunks to fill a size target of minBuffSize
-	chanSize := minBuffSize / readBuffSize
+	chanSize := param.BuffSize / readBuffSize
 	sh.ch = make(chan error, chanSize)
 	sh.resetBuff()
 	go sh.reader()
+
 	return sh
 }
 
 // SetPrompt sets the underlying prompt regex used to match end out output in every expect operation
 func (s *Shell) SetPrompt(prompt string) {
-	s.prompt = prompt
+	s.param.Prompt = prompt
 	s.retrieve = s.RegexMatcher(retrieveRegex)
 }
 
 // resetBuff clears buffer and resizes to minBuffSize
 func (s *Shell) resetBuff() {
 	s.buffer.Reset()
-	s.buffer.Grow(s.buffSize)
+	s.buffer.Grow(s.param.BuffSize)
 }
 
 // reader loops reading data from reader storing data in a strings.Builder and notifying of
@@ -129,7 +147,7 @@ func (s *Shell) Expect(m Matcher) (string, []string, error) {
 		if len(result) > 0 {
 			break
 		}
-		data, dur, err = s.read(s.timeout - timeSpent)
+		data, dur, err = s.read(s.param.Timeout - timeSpent)
 		if err != nil {
 			return "", nil, err
 		}

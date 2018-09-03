@@ -27,7 +27,8 @@ func (rw *rw) Write(b []byte) (int, error) {
 func TestBasicMatch(t *testing.T) {
 	data := "test\nrouter#"
 	rw := &rw{data: data}
-	sh := cliexpect.New(rw, rw, "(.+)(.)") // Capture the prompt and the last char of it in sub-group
+	param := cliexpect.ShellParam{Prompt: "(.+)(.)"} // Capture the prompt and the last char of it
+	sh := cliexpect.NewWithParam(rw, rw, param)
 
 	full, groups, err := sh.ExpectRegex("test.+")
 	assert.NoError(t, err)
@@ -38,7 +39,7 @@ func TestBasicMatch(t *testing.T) {
 func TestRetrieve(t *testing.T) {
 	data := "test\nrouter#"
 	rw := &rw{data: data}
-	sh := cliexpect.New(rw, rw, ".+") // Capture the prompt
+	sh := cliexpect.New(rw, rw)
 
 	full, groups, err := sh.Retrieve()
 	assert.NoError(t, err)
@@ -49,7 +50,8 @@ func TestRetrieve(t *testing.T) {
 func TestMultiRetrieve(t *testing.T) {
 	data := "test\nrouter#\nrouter#\nblah blah\nbogus bogus\nrouter>"
 	rw := &rw{data: data}
-	sh := cliexpect.New(rw, rw, "([^\n]+)[#>]") // Capture the prompt
+	sh := cliexpect.New(rw, rw)
+	sh.SetPrompt("([^\n]+)[#>]") // Capture the base prompt - must end with # or >
 
 	full, groups, err := sh.Retrieve()
 	assert.NoError(t, err)

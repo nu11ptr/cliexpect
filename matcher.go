@@ -13,7 +13,7 @@ type Matcher func(string) []int
 // RegexMatcher matches regexes in expect operations
 func (s *Shell) RegexMatcher(regex string) Matcher {
 	// TODO: Should we move this into the function? Right now if prompt changes... it won't match
-	re := regexp.MustCompile(fmt.Sprintf(matchFmt, regex, s.prompt))
+	re := regexp.MustCompile(fmt.Sprintf(matchFmt, regex, s.param.Prompt))
 
 	return func(input string) []int {
 		return re.FindStringSubmatchIndex(input)
