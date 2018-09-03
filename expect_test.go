@@ -1,7 +1,9 @@
 package cliexpect_test
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/nu11ptr/cliexpect"
 	"github.com/stretchr/testify/assert"
@@ -9,6 +11,7 @@ import (
 
 type reader struct {
 	data string
+	err  error
 }
 
 func (r *reader) Read(b []byte) (int, error) {
@@ -17,7 +20,13 @@ func (r *reader) Read(b []byte) (int, error) {
 	if r.data == "" {
 		select {} // block forever when there is no data
 	}
-	return len(r.data), nil
+	return len(r.data), r.err
+}
+
+type errReader struct{}
+
+func (r errReader) Read(b []byte) (int, error) {
+	return 0, errors.New("Bad read")
 }
 
 type writer struct {
@@ -71,6 +80,25 @@ func TestMultiRetrieve(t *testing.T) {
 	assert.Equal(t, []string{"\nblah blah\nbogus bogus\n", "router>", "router"}, groups)
 }
 
+func TestTimeout(t *testing.T) {
+	param := cliexpect.ShellParam{Timeout: 1 * time.Nanosecond}
+	sh := cliexpect.NewWithParam(new(writer), new(reader), param)
+
+	full, groups, err := sh.ExpectStr("testing\n")
+	assert.Error(t, err)
+	assert.Equal(t, "", full)
+	assert.Nil(t, groups)
+}
+
+func TestReadError(t *testing.T) {
+	sh := cliexpect.New(new(writer), new(errReader))
+
+	full, groups, err := sh.ExpectStr("testing\n")
+	assert.Error(t, err)
+	assert.Equal(t, "", full)
+	assert.Nil(t, groups)
+}
+
 func TestSendBytes(t *testing.T) {
 	w := new(writer)
 	sh := cliexpect.New(w, new(reader))
@@ -93,7 +121,7 @@ func TestSendLine(t *testing.T) {
 	w := new(writer)
 	sh := cliexpect.New(w, new(reader))
 	data := "bogus"
-	
+
 	assert.NoError(t, sh.SendLine(data))
 	assert.Equal(t, []byte(data+"\n"), w.data)
 }

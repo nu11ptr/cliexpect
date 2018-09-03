@@ -137,23 +137,22 @@ func (s *Shell) Expect(m Matcher) (string, []string, error) {
 
 	// Start by just getting whatever data is in the buffer without waiting
 	data, dur, err := s.read(0)
-	if err != nil {
-		return "", nil, err
-	}
+
 	for {
-		timeSpent += dur
 		result = m(data)
-		// If we got matches then we are done...
-		if len(result) > 0 {
+		// If we got an error or matches then we are done...
+		if err != nil || len(result) > 0 {
 			break
 		}
+		timeSpent += dur
 		data, dur, err = s.read(s.param.Timeout - timeSpent)
-		if err != nil {
-			return "", nil, err
-		}
 	}
+	// If no results then we return early
 	if len(result) < 2 {
-		return "", nil, errors.New("No matches")
+		if err == nil || err == io.EOF {
+			err = errors.New("No matches")
+		}
+		return "", nil, err
 	}
 	// Prepare for the next operation
 	s.resetBuff()
@@ -163,7 +162,7 @@ func (s *Shell) Expect(m Matcher) (string, []string, error) {
 		s.buffer.WriteString(data[result[1]:])
 	}
 	results := processResults(result, data)
-	return results[0], results[1:], nil
+	return results[0], results[1:], err
 }
 
 // processResults takes the index slice and raw data and converts tem into a slice of matched strings
@@ -197,19 +196,17 @@ func (s *Shell) Retrieve() (string, []string, error) {
 
 // read data from the buffer and return it, waiting up to timeout if no data present. In addition
 // to a string of the actual data, the actual duration of time waited is returned
-func (s *Shell) read(timeout time.Duration) (string, time.Duration, error) {
+func (s *Shell) read(timeout time.Duration) (data string, d time.Duration, err error) {
 	var reads int
-	var err error
-	if reads, err = ackReads(s.ch); err != nil {
-		return "", 0, err
+	reads, err = ackReads(s.ch)
+	data = s.buffer.String()
+
+	// Only wait if we have a timeout, no error so far, and then only if we have no data OR we did zero reads
+	if timeout > 0 && err == nil && (data == "" || reads == 0) {
+		d, err = s.waitForData(timeout)
+		data = s.buffer.String()
 	}
-	data := s.buffer.String()
-	// Only wait if we have a timeout and then only if we have no data OR we did zero reads
-	if timeout > 0 && (data == "" || reads == 0) {
-		d, err := s.waitForData(timeout)
-		return s.buffer.String(), d, err
-	}
-	return data, 0, nil
+	return
 }
 
 // ackReads acknowledges all outstanding read operations done by reader and returns number of
