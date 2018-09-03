@@ -19,3 +19,8 @@ func (s *Shell) RegexMatcher(regex string) Matcher {
 		return re.FindStringSubmatchIndex(input)
 	}
 }
+
+// StrMatcher matches a string literal in expect operations, however, it matches the prompt as a regex
+func (s *Shell) StrMatcher(str string) Matcher {
+	return s.RegexMatcher(fmt.Sprintf(`\Q%s\E`, str))
+}

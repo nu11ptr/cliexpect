@@ -182,6 +182,12 @@ func (s *Shell) ExpectRegex(re string) (string, []string, error) {
 	return s.Expect(s.RegexMatcher(re))
 }
 
+// ExpectStr takes a string, converts it to a matcher, and calls Expect looking for matches. The
+// return values are identical to Expect.
+func (s *Shell) ExpectStr(str string) (string, []string, error) {
+	return s.Expect(s.StrMatcher(str))
+}
+
 // Retrieve returns all the text before the next prompt. The results returned from this function
 // match those from the Expect function, but assume the text before the prompt is a single match
 // group (the first one)
