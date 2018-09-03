@@ -15,7 +15,8 @@ const (
 	defaultBuffSize = 16384
 	readBuffSize    = defaultBuffSize // Must always be lte size of defaultBuffSize
 
-	matchFmt = `(?msU)(%s)(^%s)`
+	matchFmt      = `(?msU)(%s)(^%s$)`
+	retrieveRegex = `.+`
 )
 
 // Shell represents a structure used in expect-like interactions
@@ -61,7 +62,7 @@ func NewParam(in io.Writer, out io.Reader, prompt string, timeout time.Duration,
 // SetPrompt sets the underlying prompt regex used to match end out output in every expect operation
 func (s *Shell) SetPrompt(prompt string) {
 	s.prompt = prompt
-	s.retrieve = s.RegexMatcher(`.*`)
+	s.retrieve = s.RegexMatcher(retrieveRegex)
 }
 
 // resetBuff clears buffer and resizes to minBuffSize
@@ -113,21 +114,24 @@ func (s *Shell) Expect(m Matcher) (string, []string, error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	var data string
 	var result []int
 	var timeSpent time.Duration
 
+	// Start by just getting whatever data is in the buffer without waiting
+	data, dur, err := s.read(0)
+	if err != nil {
+		return "", nil, err
+	}
 	for {
-		d, dur, err := s.read(s.timeout - timeSpent)
-		if err != nil {
-			return "", nil, err
-		}
 		timeSpent += dur
-		result = m(d)
+		result = m(data)
 		// If we got matches then we are done...
 		if len(result) > 0 {
-			data = d
 			break
+		}
+		data, dur, err = s.read(s.timeout - timeSpent)
+		if err != nil {
+			return "", nil, err
 		}
 	}
 	if len(result) < 2 {
@@ -140,13 +144,18 @@ func (s *Shell) Expect(m Matcher) (string, []string, error) {
 		// Write the remaining data back to the buffer
 		s.buffer.WriteString(data[result[1]:])
 	}
-	// Take the index slice and convert it into all the matched strings
-	subMatchPairs := len(result) - 2
+	results := processResults(result, data)
+	return results[0], results[1:], nil
+}
+
+// processResults takes the index slice and raw data and converts tem into a slice of matched strings
+func processResults(result []int, data string) []string {
+	subMatchPairs := len(result)
 	matches := make([]string, subMatchPairs/2)
 	for i, j := 0, 0; i < subMatchPairs; i, j = i+2, j+1 {
-		matches[j] = data[result[2+i]:result[2+i+1]]
+		matches[j] = data[result[i]:result[i+1]]
 	}
-	return data[result[0]:result[1]], matches, nil
+	return matches
 }
 
 // ExpectRegex takes a regex as a string, compiles it, and calls Expect looking for matches. The
@@ -171,7 +180,8 @@ func (s *Shell) read(timeout time.Duration) (string, time.Duration, error) {
 		return "", 0, err
 	}
 	data := s.buffer.String()
-	if data == "" || reads == 0 {
+	// Only wait if we have a timeout and then only if we have no data OR we did zero reads
+	if timeout > 0 && (data == "" || reads == 0) {
 		d, err := s.waitForData(timeout)
 		return s.buffer.String(), d, err
 	}

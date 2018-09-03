@@ -24,12 +24,45 @@ func (rw *rw) Write(b []byte) (int, error) {
 	return 0, nil
 }
 
-func TestMatch(t *testing.T) {
-	rw := &rw{data: "test\nrouter#"}
-	sh := cliexpect.New(rw, rw, "(.+)(.)$") // Capture the prompt and the last char of it in sub-group
+func TestBasicMatch(t *testing.T) {
+	data := "test\nrouter#"
+	rw := &rw{data: data}
+	sh := cliexpect.New(rw, rw, "(.+)(.)") // Capture the prompt and the last char of it in sub-group
 
 	full, groups, err := sh.ExpectRegex("test.+")
 	assert.NoError(t, err)
-	assert.Equal(t, "test\nrouter#", full)
+	assert.Equal(t, data, full)
 	assert.Equal(t, []string{"test\n", "router#", "router", "#"}, groups)
+}
+
+func TestRetrieve(t *testing.T) {
+	data := "test\nrouter#"
+	rw := &rw{data: data}
+	sh := cliexpect.New(rw, rw, ".+") // Capture the prompt
+
+	full, groups, err := sh.Retrieve()
+	assert.NoError(t, err)
+	assert.Equal(t, data, full)
+	assert.Equal(t, []string{"test\n", "router#"}, groups)
+}
+
+func TestMultiRetrieve(t *testing.T) {
+	data := "test\nrouter#\nrouter#\nblah blah\nbogus bogus\nrouter>"
+	rw := &rw{data: data}
+	sh := cliexpect.New(rw, rw, "([^\n]+)[#>]") // Capture the prompt
+
+	full, groups, err := sh.Retrieve()
+	assert.NoError(t, err)
+	assert.Equal(t, "test\nrouter#", full)
+	assert.Equal(t, []string{"test\n", "router#", "router"}, groups)
+
+	full, groups, err = sh.Retrieve()
+	assert.NoError(t, err)
+	assert.Equal(t, "\nrouter#", full)
+	assert.Equal(t, []string{"\n", "router#", "router"}, groups)
+
+	full, groups, err = sh.Retrieve()
+	assert.NoError(t, err)
+	assert.Equal(t, "\nblah blah\nbogus bogus\nrouter>", full)
+	assert.Equal(t, []string{"\nblah blah\nbogus bogus\n", "router>", "router"}, groups)
 }
