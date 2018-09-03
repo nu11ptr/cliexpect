@@ -7,11 +7,13 @@ clone_folder: c:\gopath\src\github.com\nu11ptr\cliexpect
 environment:
   GOPATH: c:\gopath
 
-build: false
 deploy: false
 
+build_script:
+  - go build -v ./...
+
 before_test:
-  - go vet ./...
+  - go vet -all ./...
 
 test_script:
   - go test -v -race ./...
