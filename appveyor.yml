@@ -2,7 +2,7 @@ version: build-{build}.{branch}
 
 platform: x64
 
-clone_folder: c:\gopath\src\github.com\$username\$project
+clone_folder: c:\gopath\src\github.com\nu11ptr\cliexpect
 
 environment:
   GOPATH: c:\gopath
