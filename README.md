@@ -7,7 +7,7 @@ An expect client designed to work specifically with CLI shell interfaces. Specif
 
 A simple example of a typical use case:
 
-```
+```go
 	// Typical CLI output for the 'file' command (minus echo)
 	input := `user@host:~$ 
 test.py: ASCII text
@@ -30,7 +30,7 @@ user@host:~$ `
 
 The output is (the first string is matched text, the second the matched prompt):
 
-```
+```go
 ["" "user@host:~$ "]
 ["\ntest.py: ASCII text\n" "user@host:~$ "]
 ```
