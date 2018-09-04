@@ -8,7 +8,7 @@ import (
 )
 
 func TestRegexMatcher(t *testing.T) {
-	sh := cliexpect.New(new(writer), new(reader))
+	sh := cliexpect.New(new(writer), new(blockingReader))
 	data := "blah blah\nrouter#"
 	m := sh.RegexMatcher(".+")
 	result := m(data)
@@ -16,7 +16,7 @@ func TestRegexMatcher(t *testing.T) {
 }
 
 func TestStrMatcher(t *testing.T) {
-	sh := cliexpect.New(new(writer), new(reader))
+	sh := cliexpect.New(new(writer), new(blockingReader))
 	data := "blah blah\nrouter#"
 	m := sh.StrMatcher("blah blah\n")
 	result := m(data)

@@ -2,25 +2,27 @@ package cliexpect_test
 
 import (
 	"errors"
+	"io"
+	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/nu11ptr/cliexpect"
 	"github.com/stretchr/testify/assert"
 )
 
-type reader struct {
+type blockingReader struct {
 	data string
-	err  error
 }
 
-func (r *reader) Read(b []byte) (int, error) {
+func (r *blockingReader) Read(b []byte) (int, error) {
 	copy(b, r.data)
 	defer func() { r.data = "" }()
 	if r.data == "" {
 		select {} // block forever when there is no data
 	}
-	return len(r.data), r.err
+	return len(r.data), nil
 }
 
 type errReader struct{}
@@ -38,10 +40,54 @@ func (w *writer) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func TestBasicMatch(t *testing.T) {
+func TestMatch(t *testing.T) {
+	data := "test\nrouter#"
+
+	tests := []struct {
+		name, regex, full string
+		groups            []string
+		err               error
+		reader            func(string) io.Reader
+	}{
+		{"Fake", "test.+", data, []string{"test\n", "router#"}, nil,
+			func(s string) io.Reader { return &blockingReader{data: s} }},
+		{"Strings", "test.+", data, []string{"test\n", "router#"}, nil,
+			func(s string) io.Reader { return strings.NewReader(s) }},
+		{"StringsNoMatch", "testing.+", "", nil, cliexpect.ErrNoMatches,
+			func(s string) io.Reader { return strings.NewReader(s) }},
+		{"DataErrReader", "test.+", data, []string{"test\n", "router#"}, io.EOF,
+			func(s string) io.Reader { return iotest.DataErrReader(strings.NewReader(s)) }},
+		{"DataErrReaderNoMatch", "testing.+", "", nil, cliexpect.ErrNoMatches,
+			func(s string) io.Reader { return iotest.DataErrReader(strings.NewReader(s)) }},
+		{"OneByteReader", "test.+", data, []string{"test\n", "router#"}, nil,
+			func(s string) io.Reader { return iotest.OneByteReader(strings.NewReader(s)) }},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			sh := cliexpect.New(new(writer), test.reader(data))
+			sh.SetPrompt("[^\n]+#") // Must end in pound so OneByteReader knows it needs more data
+			full, groups, err := sh.ExpectRegex(test.regex)
+			// NOTE: Running the test with "-race" alters the ordering of the goroutines are 
+			// performed and the error on 'Strings' fluctuates between nil and EOF...however, we 
+			// don't really care whether or not we get an EOF or nil and both are correct
+			if test.name == "Strings" {
+				if err != io.EOF && err != nil {
+					t.Fail()
+				}
+			} else { // All other tests
+				assert.Equal(t, test.err, err)
+			}
+			assert.Equal(t, test.full, full)
+			assert.Equal(t, test.groups, groups)
+		})
+	}
+}
+
+func TestSubMatches(t *testing.T) {
 	data := "test\nrouter#"
 	param := cliexpect.ShellParam{Prompt: "(.+)(.)"} // Capture the prompt and the last char of it
-	sh := cliexpect.NewWithParam(new(writer), &reader{data: data}, param)
+	sh := cliexpect.NewWithParam(new(writer), &blockingReader{data: data}, param)
 
 	full, groups, err := sh.ExpectRegex("test.+")
 	assert.NoError(t, err)
@@ -51,7 +97,7 @@ func TestBasicMatch(t *testing.T) {
 
 func TestRetrieve(t *testing.T) {
 	data := "test\nrouter#"
-	sh := cliexpect.New(new(writer), &reader{data: data})
+	sh := cliexpect.New(new(writer), &blockingReader{data: data})
 
 	full, groups, err := sh.Retrieve()
 	assert.NoError(t, err)
@@ -61,28 +107,33 @@ func TestRetrieve(t *testing.T) {
 
 func TestMultiRetrieve(t *testing.T) {
 	data := "test\nrouter#\nrouter#\nblah blah\nbogus bogus\nrouter>"
-	sh := cliexpect.New(new(writer), &reader{data: data})
+	sh := cliexpect.New(new(writer), &blockingReader{data: data})
 	sh.SetPrompt("([^\n]+)[#>]") // Capture the base prompt - must end with # or >
 
-	full, groups, err := sh.Retrieve()
-	assert.NoError(t, err)
-	assert.Equal(t, "test\nrouter#", full)
-	assert.Equal(t, []string{"test\n", "router#", "router"}, groups)
-
-	full, groups, err = sh.Retrieve()
-	assert.NoError(t, err)
-	assert.Equal(t, "\nrouter#", full)
-	assert.Equal(t, []string{"\n", "router#", "router"}, groups)
-
-	full, groups, err = sh.Retrieve()
-	assert.NoError(t, err)
-	assert.Equal(t, "\nblah blah\nbogus bogus\nrouter>", full)
-	assert.Equal(t, []string{"\nblah blah\nbogus bogus\n", "router>", "router"}, groups)
+	tests := []struct {
+		name   string
+		full   string
+		groups []string
+		err    error
+	}{
+		{"Retrieve1", "test\nrouter#", []string{"test\n", "router#", "router"}, nil},
+		{"Retrieve2", "\nrouter#", []string{"\n", "router#", "router"}, nil},
+		{"Retrieve3", "\nblah blah\nbogus bogus\nrouter>",
+			[]string{"\nblah blah\nbogus bogus\n", "router>", "router"}, nil},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			full, groups, err := sh.Retrieve()
+			assert.Equal(t, test.err, err)
+			assert.Equal(t, test.full, full)
+			assert.Equal(t, test.groups, groups)
+		})
+	}
 }
 
 func TestTimeout(t *testing.T) {
 	param := cliexpect.ShellParam{Timeout: 1 * time.Nanosecond}
-	sh := cliexpect.NewWithParam(new(writer), new(reader), param)
+	sh := cliexpect.NewWithParam(new(writer), new(blockingReader), param)
 
 	full, groups, err := sh.ExpectStr("testing\n")
 	assert.Error(t, err)
@@ -101,7 +152,7 @@ func TestReadError(t *testing.T) {
 
 func TestSendBytes(t *testing.T) {
 	w := new(writer)
-	sh := cliexpect.New(w, new(reader))
+	sh := cliexpect.New(w, new(blockingReader))
 	data := []byte("bogus")
 
 	assert.NoError(t, sh.SendBytes(data))
@@ -110,7 +161,7 @@ func TestSendBytes(t *testing.T) {
 
 func TestSend(t *testing.T) {
 	w := new(writer)
-	sh := cliexpect.New(w, new(reader))
+	sh := cliexpect.New(w, new(blockingReader))
 	data := "bogus"
 
 	assert.NoError(t, sh.Send(data))
@@ -119,7 +170,7 @@ func TestSend(t *testing.T) {
 
 func TestSendLine(t *testing.T) {
 	w := new(writer)
-	sh := cliexpect.New(w, new(reader))
+	sh := cliexpect.New(w, new(blockingReader))
 	data := "bogus"
 
 	assert.NoError(t, sh.SendLine(data))

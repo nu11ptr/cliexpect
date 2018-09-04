@@ -5,4 +5,4 @@ An expect client designed to work specifically with CLI shell interfaces. Specif
 
 ### Status
 
-It is currently under heavy development and should not be used other than for testing.
+It is thought to be feature complete and stable and has a comprehensive test suite, however, it has seen very limited real world use. Use at your own risk.

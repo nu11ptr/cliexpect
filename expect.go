@@ -20,6 +20,10 @@ const (
 	defaultPromptRegex = "[^\n]+" // Prompt is one or more chars that are NOT a CR
 )
 
+// ErrNoMatches represents the error returned when the expected matcher is not matched and
+// the reader returns an error (if it doesn't eventually it just times out)
+var ErrNoMatches = errors.New("No matches")
+
 // ShellParam defines optional parameters for the expect shell
 type ShellParam struct {
 	Timeout  time.Duration
@@ -150,7 +154,7 @@ func (s *Shell) Expect(m Matcher) (string, []string, error) {
 	// If no results then we return early
 	if len(result) < 2 {
 		if err == nil || err == io.EOF {
-			err = errors.New("No matches")
+			err = ErrNoMatches
 		}
 		return "", nil, err
 	}
