@@ -1,9 +1,10 @@
-// Package cliexpect defines functions for matching text in a CLI environment. Specifically, each
-// match assumes an eventual prompt at the end of the data and handles this as a special case.
+// Package cliexpect is designed to work specifically with CLI shell interfaces. Specifically, it
+// always assumes a prompt will separate the data allowing easy traversal of multiple outputs.
 package cliexpect
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -16,7 +17,7 @@ const (
 	readBuffSize    = defaultBuffSize // Must always be lte size of defaultBuffSize
 
 	matchFmt           = `(?msU)(%s)(^%s$)`
-	retrieveRegex      = `.+`     // Body can't actually be blank - at minimum it is a CR
+	retrieveRegex      = `.*`
 	defaultPromptRegex = "[^\n]+" // Prompt is one or more chars that are NOT a CR
 )
 
@@ -71,7 +72,7 @@ func NewWithParam(in io.Writer, out io.Reader, param ShellParam) *Shell {
 	validateParams(&param)
 
 	sh := &Shell{in: in, out: out, param: param}
-	sh.SetPrompt(param.Prompt)
+	sh.SetPromptRegex(param.Prompt)
 	// We try an size the channel based on expected number of data chunks to fill a size target of minBuffSize
 	chanSize := param.BuffSize / readBuffSize
 	sh.ch = make(chan error, chanSize)
@@ -81,10 +82,16 @@ func NewWithParam(in io.Writer, out io.Reader, param ShellParam) *Shell {
 	return sh
 }
 
-// SetPrompt sets the underlying prompt regex used to match end out output in every expect operation
-func (s *Shell) SetPrompt(prompt string) {
-	s.param.Prompt = prompt
+// SetPromptRegex sets the underlying prompt regex used to match the end of output in every expect operation
+func (s *Shell) SetPromptRegex(re string) {
+	s.param.Prompt = re
 	s.retrieve = s.RegexMatcher(retrieveRegex)
+}
+
+// SetPrompt sets the underlying prompt to match based on a literal string and is used to match
+// the end of output in every expect operation
+func (s *Shell) SetPrompt(prompt string) {
+	s.SetPromptRegex(fmt.Sprintf(`\Q%s\E`, prompt))
 }
 
 // resetBuff clears buffer and resizes to minBuffSize

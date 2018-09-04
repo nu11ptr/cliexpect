@@ -66,10 +66,10 @@ func TestMatch(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			sh := cliexpect.New(new(writer), test.reader(data))
-			sh.SetPrompt("[^\n]+#") // Must end in pound so OneByteReader knows it needs more data
+			sh.SetPromptRegex("[^\n]+#") // Must end in pound so OneByteReader knows it needs more data
 			full, groups, err := sh.ExpectRegex(test.regex)
-			// NOTE: Running the test with "-race" alters the ordering of the goroutines are 
-			// performed and the error on 'Strings' fluctuates between nil and EOF...however, we 
+			// NOTE: Running the test with "-race" alters the ordering the goroutines are
+			// performed and the error on 'Strings' fluctuates between nil and EOF...however, we
 			// don't really care whether or not we get an EOF or nil and both are correct
 			if test.name == "Strings" {
 				if err != io.EOF && err != nil {
@@ -98,6 +98,7 @@ func TestSubMatches(t *testing.T) {
 func TestRetrieve(t *testing.T) {
 	data := "test\nrouter#"
 	sh := cliexpect.New(new(writer), &blockingReader{data: data})
+	sh.SetPromptRegex("[^\n]+#") // Prompt must end with hash/pound
 
 	full, groups, err := sh.Retrieve()
 	assert.NoError(t, err)
@@ -108,7 +109,7 @@ func TestRetrieve(t *testing.T) {
 func TestMultiRetrieve(t *testing.T) {
 	data := "test\nrouter#\nrouter#\nblah blah\nbogus bogus\nrouter>"
 	sh := cliexpect.New(new(writer), &blockingReader{data: data})
-	sh.SetPrompt("([^\n]+)[#>]") // Capture the base prompt - must end with # or >
+	sh.SetPromptRegex("([^\n]+)[#>]") // Capture the base prompt - must end with # or >
 
 	tests := []struct {
 		name   string

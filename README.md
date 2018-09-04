@@ -3,6 +3,40 @@
 
 An expect client designed to work specifically with CLI shell interfaces. Specifically, it always assumes a prompt will separate the data allowing easy traversal of multiple outputs.
 
-### Status
+# Usage
+
+A simple example of a typical use case:
+
+```
+	// Typical CLI output for the 'file' command (minus echo)
+	input := `user@host:~$ 
+test.py: ASCII text
+user@host:~$ `
+
+	sh := cliexpect.New(new(strings.Builder), strings.NewReader(input))
+
+	// Learn the prompt and set it to that value
+	// NOTE: In real world, check for errors :-)
+	_, groups, _ := sh.Retrieve()
+	sh.SetPrompt(groups[1])
+	fmt.Printf("%q\n", groups)
+
+	sh.SendLine("file test.py")
+
+	// The only thing we know is that it should list 'test.py' in the output - get the rest
+	_, groups, _ = sh.ExpectRegex(".*test.py.*")
+	fmt.Printf("%q\n", groups)
+```
+
+The output is (the first string is matched text, the second the matched prompt):
+
+```
+["" "user@host:~$ "]
+["\ntest.py: ASCII text\n" "user@host:~$ "]
+```
+
+Play with cliexpect in your browser [here](https://play.jsgo.io/3bc88a928255db615ce7afeacb60dc4cb2549194)
+
+# Status
 
 It is thought to be feature complete and stable and has a comprehensive test suite, however, it has seen very limited real world use. Use at your own risk.
