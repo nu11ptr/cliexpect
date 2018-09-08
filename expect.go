@@ -16,9 +16,9 @@ const (
 	defaultBuffSize = 16384
 	readBuffSize    = defaultBuffSize // Must always be lte size of defaultBuffSize
 
-	matchFmt           = `(?msU)(%s)(^%s$)`
-	retrieveRegex      = `.*`
-	defaultPromptRegex = "[^\n]+" // Prompt is one or more chars that are NOT a CR
+	matchFmt           = `(?ms)`
+	retrieveRegex      = `(.*?)(^%s$)`
+	defaultPromptRegex = `\S+` // Prompt is one or more chars that are NOT whitespace
 )
 
 // ErrNoMatches represents the error returned when the expected matcher is not matched and
@@ -29,7 +29,8 @@ var ErrNoMatches = errors.New("No matches")
 type ShellParam struct {
 	Timeout  time.Duration
 	BuffSize int
-	Prompt   string
+
+	retrieve Matcher
 }
 
 // Shell represents a structure used in expect-like interactions
@@ -45,8 +46,6 @@ type Shell struct {
 	ch     chan error
 	lock   sync.Mutex
 	buffer strings.Builder
-
-	retrieve Matcher
 }
 
 // New creates an expect struct using the specified Writer/Reader with default parameters
@@ -62,9 +61,6 @@ func validateParams(param *ShellParam) {
 	if param.Timeout < 1 {
 		param.Timeout = defaultTimeout
 	}
-	if param.Prompt == "" {
-		param.Prompt = defaultPromptRegex
-	}
 }
 
 // NewWithParam creates an expect struct using the specified Writer/Reader with the specified parameters
@@ -72,7 +68,7 @@ func NewWithParam(in io.Writer, out io.Reader, param ShellParam) *Shell {
 	validateParams(&param)
 
 	sh := &Shell{in: in, out: out, param: param}
-	sh.SetPromptRegex(param.Prompt)
+	sh.SetPromptRegex(defaultPromptRegex)
 	// We try an size the channel based on expected number of data chunks to fill a size target of minBuffSize
 	chanSize := param.BuffSize / readBuffSize
 	sh.ch = make(chan error, chanSize)
@@ -84,8 +80,7 @@ func NewWithParam(in io.Writer, out io.Reader, param ShellParam) *Shell {
 
 // SetPromptRegex sets the underlying prompt regex used to match the end of output in every expect operation
 func (s *Shell) SetPromptRegex(re string) {
-	s.param.Prompt = re
-	s.retrieve = s.RegexMatcher(retrieveRegex)
+	s.param.retrieve = RegexMatcher(fmt.Sprintf(retrieveRegex, re))
 }
 
 // SetPrompt sets the underlying prompt to match based on a literal string and is used to match
@@ -135,11 +130,10 @@ func (s *Shell) SendLine(str string) error {
 	return s.SendBytes([]byte(str + "\n"))
 }
 
-// Expect takes a matcher and tries to match it against the current data that was received. If it
-// cannot make a match, it will try again waiting up to timeout to make the match.  It returns the
-// entire match, all submatches, and an error, if any occurred. If err is set then no matches will
-// be returned
-func (s *Shell) Expect(m Matcher) (string, []string, error) {
+// Retrieve returns all the text before the next prompt. The results returned from this function
+// match those from the Expect function, but assume the text before the prompt is a single match
+// group (the first one)
+func (s *Shell) Retrieve() (string, []string, error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -150,7 +144,7 @@ func (s *Shell) Expect(m Matcher) (string, []string, error) {
 	data, dur, err := s.read(0)
 
 	for {
-		result = m(data)
+		result = s.param.retrieve(data)
 		// If we got an error or matches then we are done...
 		if err != nil || len(result) > 0 {
 			break
@@ -159,7 +153,7 @@ func (s *Shell) Expect(m Matcher) (string, []string, error) {
 		data, dur, err = s.read(s.param.Timeout - timeSpent)
 	}
 	// If no results then we return early
-	if len(result) < 2 {
+	if len(result) < 6 { // Full match + body + prompt
 		if err == nil || err == io.EOF {
 			err = ErrNoMatches
 		}
@@ -186,23 +180,37 @@ func processResults(result []int, data string) []string {
 	return matches
 }
 
+// Expect takes a matcher and tries to match it against the current data that was received. It returns the
+// entire match, all submatches, and an error, if any occurred.
+func (s *Shell) Expect(m Matcher) (string, []string, error) {
+	full, groups, err := s.Retrieve()
+	if len(groups) < 2 {
+		return "", nil, err
+	}
+	// We base the 2nd match purely on the body we retrieved
+	result := m(groups[0])
+	if len(result) < 2 {
+		if err == nil || err == io.EOF {
+			err = ErrNoMatches
+		}
+		return "", nil, err
+	}
+	results := processResults(result, groups[0])
+	// Add the original prompt matches back onto the results
+	results = append(results, groups[1:]...)
+	return full, results, err
+}
+
 // ExpectRegex takes a regex as a string, compiles it, and calls Expect looking for matches. The
 // return values are identical to Expect.
 func (s *Shell) ExpectRegex(re string) (string, []string, error) {
-	return s.Expect(s.RegexMatcher(re))
+	return s.Expect(RegexMatcher(re))
 }
 
 // ExpectStr takes a string, converts it to a matcher, and calls Expect looking for matches. The
 // return values are identical to Expect.
 func (s *Shell) ExpectStr(str string) (string, []string, error) {
-	return s.Expect(s.StrMatcher(str))
-}
-
-// Retrieve returns all the text before the next prompt. The results returned from this function
-// match those from the Expect function, but assume the text before the prompt is a single match
-// group (the first one)
-func (s *Shell) Retrieve() (string, []string, error) {
-	return s.Expect(s.retrieve)
+	return s.Expect(StrMatcher(str))
 }
 
 // read data from the buffer and return it, waiting up to timeout if no data present. In addition

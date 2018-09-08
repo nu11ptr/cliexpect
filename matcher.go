@@ -11,9 +11,8 @@ import (
 type Matcher func(string) []int
 
 // RegexMatcher matches regexes in expect operations
-func (s *Shell) RegexMatcher(regex string) Matcher {
-	// TODO: Should we move this into the function? Right now if prompt changes... it won't match
-	re := regexp.MustCompile(fmt.Sprintf(matchFmt, regex, s.param.Prompt))
+func RegexMatcher(regex string) Matcher {
+	re := regexp.MustCompile(matchFmt + regex)
 
 	return func(input string) []int {
 		return re.FindStringSubmatchIndex(input)
@@ -21,6 +20,6 @@ func (s *Shell) RegexMatcher(regex string) Matcher {
 }
 
 // StrMatcher matches a string literal in expect operations, however, it matches the prompt as a regex
-func (s *Shell) StrMatcher(str string) Matcher {
-	return s.RegexMatcher(fmt.Sprintf(`\Q%s\E`, str))
+func StrMatcher(str string) Matcher {
+	return RegexMatcher(fmt.Sprintf(`\Q%s\E`, str))
 }

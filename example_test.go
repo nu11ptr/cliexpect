@@ -14,15 +14,17 @@ test.py: ASCII text
 user@host:~$ `
 
 	sh := cliexpect.New(new(strings.Builder), strings.NewReader(input))
+	// Setup the prompt regex based on the expected format
+	sh.SetPromptRegex(`\w+@\w+:\S+\$ `)
 
-	// Learn the prompt and set it to that value
 	// NOTE: In real world, check for errors :-)
 	_, groups, _ := sh.Retrieve()
-	sh.SetPrompt(groups[1])
 	fmt.Printf("%q\n", groups)
 
 	sh.SendLine("file test.py")
 
+	// Optional - since we now have the exact prompt, we can set it explcitely if we want
+	sh.SetPrompt(groups[1])
 	// The only thing we know is that it should list 'test.py' in the output - get the rest
 	_, groups, _ = sh.ExpectRegex(".*test.py.*")
 	fmt.Printf("%q\n", groups)

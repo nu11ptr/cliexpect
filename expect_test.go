@@ -66,7 +66,7 @@ func TestMatch(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			sh := cliexpect.New(new(writer), test.reader(data))
-			sh.SetPromptRegex("[^\n]+#") // Must end in pound so OneByteReader knows it needs more data
+			sh.SetPromptRegex(`\S+#`) // Must end in pound so OneByteReader knows it needs more data
 			full, groups, err := sh.ExpectRegex(test.regex)
 			// NOTE: Running the test with "-race" alters the ordering the goroutines are
 			// performed and the error on 'Strings' fluctuates between nil and EOF...however, we
@@ -86,8 +86,8 @@ func TestMatch(t *testing.T) {
 
 func TestSubMatches(t *testing.T) {
 	data := "test\nrouter#"
-	param := cliexpect.ShellParam{Prompt: "(.+)(.)"} // Capture the prompt and the last char of it
-	sh := cliexpect.NewWithParam(new(writer), &blockingReader{data: data}, param)
+	sh := cliexpect.New(new(writer), &blockingReader{data: data})
+	sh.SetPromptRegex(`(\w+)([#|>])`) // Capture the prompt and the last char of it
 
 	full, groups, err := sh.ExpectRegex("test.+")
 	assert.NoError(t, err)
